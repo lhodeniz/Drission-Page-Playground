@@ -1,0 +1,8 @@
+{
+  "name": "DrissionPage Playground",
+  "description": "An interactive playground for testing and learning DrissionPage-style locators and HTML parsing, similar to try.jsoup.org.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
