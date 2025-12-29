@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ProcessingResult } from "./types";
+import { ProcessingResult, ExtractedElement } from "./types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -20,6 +20,7 @@ DrissionPage Locator Rules:
 
 You must parse the provided HTML and find ALL elements matching the locator.
 Return the results in a strict JSON format matching the schema provided.
+For 'attributes', provide an array of objects, each containing a 'name' and a 'value' key.
 Include the tag name, outer HTML, inner text, and attributes for each found element.
 `;
 
@@ -46,8 +47,15 @@ ${selector}`,
                   tag: { type: Type.STRING },
                   text: { type: Type.STRING },
                   attributes: { 
-                    type: Type.OBJECT,
-                    additionalProperties: { type: Type.STRING }
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        value: { type: Type.STRING }
+                      },
+                      required: ["name", "value"]
+                    }
                   },
                   html: { type: Type.STRING }
                 },
@@ -62,8 +70,22 @@ ${selector}`,
       }
     });
 
-    const result = JSON.parse(response.text || "{}");
-    return result as ProcessingResult;
+    const rawResult = JSON.parse(response.text || "{}");
+    
+    // Transform the array of attributes back into a Record for the application
+    const elements: ExtractedElement[] = (rawResult.elements || []).map((el: any) => ({
+      ...el,
+      attributes: (el.attributes || []).reduce((acc: Record<string, string>, curr: { name: string, value: string }) => {
+        acc[curr.name] = curr.value;
+        return acc;
+      }, {})
+    }));
+
+    return {
+      elements,
+      count: rawResult.count || elements.length,
+      selectorUsed: rawResult.selectorUsed || selector
+    };
   } catch (error) {
     console.error("Error processing selector:", error);
     return {
@@ -76,9 +98,6 @@ ${selector}`,
 };
 
 export const fetchUrlSimulated = async (url: string): Promise<string> => {
-  // Browsers block direct fetching of external URLs via CORS.
-  // We use Gemini to "simulatedly fetch" or represent what the HTML for that page likely looks like
-  // Or users can just paste. For "try" functionality, we'll ask Gemini to generate HTML for the URL.
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",

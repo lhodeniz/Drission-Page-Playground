@@ -1,8 +1,93 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { AppState, ProcessingResult } from './types';
 import { processSelector, fetchUrlSimulated } from './geminiService';
 import CheatSheet from './components/CheatSheet';
+
+// --- Sub-component for Foldable Tree View ---
+const HTMLTreeNode: React.FC<{ node: Node }> = ({ node }) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent?.trim();
+    if (!text) return null;
+    return <span className="text-gray-600 dark:text-gray-400 ml-6 break-words">{text}</span>;
+  }
+
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const element = node as Element;
+    const tagName = element.tagName.toLowerCase();
+    const hasChildren = element.childNodes.length > 0;
+    const attributes = Array.from(element.attributes);
+
+    return (
+      <div className="flex flex-col ml-4 border-l border-gray-100 hover:border-blue-200 transition-colors">
+        <div 
+          className="flex items-center gap-1 cursor-pointer select-none group py-0.5"
+          onClick={() => hasChildren && setIsCollapsed(!isCollapsed)}
+        >
+          {hasChildren ? (
+            <i className={`fas fa-chevron-right text-[8px] transition-transform text-gray-400 ${!isCollapsed ? 'rotate-90' : ''}`}></i>
+          ) : (
+            <div className="w-2" />
+          )}
+          
+          <span className="text-blue-600 font-bold font-mono">
+            &lt;{tagName}
+          </span>
+          
+          {attributes.map(attr => (
+            <span key={attr.name} className="ml-1 font-mono text-xs">
+              <span className="text-purple-600">{attr.name}</span>
+              <span className="text-gray-400">=</span>
+              <span className="text-green-600">"{attr.value}"</span>
+            </span>
+          ))}
+          
+          <span className="text-blue-600 font-bold font-mono">&gt;</span>
+          
+          {isCollapsed && hasChildren && (
+            <span className="bg-gray-100 text-gray-400 text-[10px] px-1 rounded mx-1">...</span>
+          )}
+          
+          {isCollapsed && hasChildren && (
+            <span className="text-blue-600 font-bold font-mono">&lt;/{tagName}&gt;</span>
+          )}
+        </div>
+
+        {!isCollapsed && hasChildren && (
+          <div className="flex flex-col">
+            {Array.from(element.childNodes).map((child, idx) => (
+              <HTMLTreeNode key={idx} node={child} />
+            ))}
+            <div className="flex items-center gap-1 py-0.5">
+              <div className="w-2" />
+              <span className="text-blue-600 font-bold font-mono">&lt;/{tagName}&gt;</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+};
+
+const HTMLTreeViewer: React.FC<{ html: string }> = ({ html }) => {
+  const tree = useMemo(() => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    return Array.from(doc.body.childNodes);
+  }, [html]);
+
+  return (
+    <div className="font-mono text-xs p-2">
+      {tree.map((node, idx) => (
+        <HTMLTreeNode key={idx} node={node} />
+      ))}
+    </div>
+  );
+};
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
@@ -31,6 +116,8 @@ const App: React.FC = () => {
     activeTab: 'source'
   });
 
+  const [sourceMode, setSourceMode] = useState<'edit' | 'fold'>('edit');
+
   const handleFetch = async () => {
     if (!state.url) return;
     setState(prev => ({ ...prev, isLoading: true }));
@@ -52,6 +139,12 @@ const App: React.FC = () => {
       setState(prev => ({ ...prev, isLoading: false }));
     }
   }, [state.html, state.selector]);
+
+  const handleClear = () => {
+    if (window.confirm('Are you sure you want to clear the HTML source?')) {
+      setState(prev => ({ ...prev, html: '' }));
+    }
+  };
 
   // Initial run
   useEffect(() => {
@@ -137,30 +230,68 @@ const App: React.FC = () => {
           <section className="flex-1 flex gap-4 min-h-0">
             {/* Left: Input HTML/Preview */}
             <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="flex border-b border-gray-200 bg-gray-50">
-                <button 
-                  onClick={() => setState(prev => ({ ...prev, activeTab: 'source' }))}
-                  className={`px-4 py-2 text-sm font-medium transition-colors ${state.activeTab === 'source' ? 'bg-white border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  <i className="fas fa-code mr-2"></i> HTML Source
-                </button>
-                <button 
-                  onClick={() => setState(prev => ({ ...prev, activeTab: 'preview' }))}
-                  className={`px-4 py-2 text-sm font-medium transition-colors ${state.activeTab === 'preview' ? 'bg-white border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  <i className="fas fa-eye mr-2"></i> Visual Preview
-                </button>
+              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 pr-2">
+                <div className="flex">
+                  <button 
+                    onClick={() => setState(prev => ({ ...prev, activeTab: 'source' }))}
+                    className={`px-4 py-2 text-sm font-medium transition-colors ${state.activeTab === 'source' ? 'bg-white border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    <i className="fas fa-code mr-2"></i> HTML Source
+                  </button>
+                  <button 
+                    onClick={() => setState(prev => ({ ...prev, activeTab: 'preview' }))}
+                    className={`px-4 py-2 text-sm font-medium transition-colors ${state.activeTab === 'preview' ? 'bg-white border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    <i className="fas fa-eye mr-2"></i> Visual Preview
+                  </button>
+                </div>
+                
+                {state.activeTab === 'source' && (
+                  <div className="flex items-center gap-2 ml-auto">
+                    {/* Fold/Edit Toggle */}
+                    <div className="flex bg-gray-200 p-0.5 rounded-lg border border-gray-300">
+                      <button 
+                        onClick={() => setSourceMode('edit')}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${sourceMode === 'edit' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        EDIT
+                      </button>
+                      <button 
+                        onClick={() => setSourceMode('fold')}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${sourceMode === 'fold' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        FOLDABLE
+                      </button>
+                    </div>
+
+                    <div className="h-4 w-[1px] bg-gray-300 mx-1"></div>
+                    
+                    <button 
+                      onClick={handleClear}
+                      title="Clear HTML Source"
+                      className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      <i className="fas fa-trash-alt text-xs"></i>
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex-1 overflow-auto p-4 relative">
+
+              <div className="flex-1 overflow-auto bg-slate-50 relative">
                 {state.activeTab === 'source' ? (
-                  <textarea 
-                    value={state.html}
-                    onChange={(e) => setState(prev => ({ ...prev, html: e.target.value }))}
-                    className="w-full h-full font-mono text-xs p-4 bg-slate-50 border border-gray-100 rounded focus:outline-none resize-none leading-relaxed"
-                  />
+                  sourceMode === 'edit' ? (
+                    <textarea 
+                      value={state.html}
+                      onChange={(e) => setState(prev => ({ ...prev, html: e.target.value }))}
+                      className="w-full h-full font-mono text-xs p-4 bg-transparent focus:outline-none resize-none leading-relaxed"
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <HTMLTreeViewer html={state.html} />
+                  )
                 ) : (
                   <div 
-                    className="prose prose-sm max-w-none border border-gray-100 p-4 rounded bg-white shadow-inner min-h-full"
+                    className="prose prose-sm max-w-none p-4 bg-white min-h-full"
                     dangerouslySetInnerHTML={{ __html: state.html }}
                   />
                 )}
